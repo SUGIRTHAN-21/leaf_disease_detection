@@ -105,3 +105,184 @@ def extract_features(image_path):
     }
     
     return features
+
+def validate_image_quality(image_path):
+    """
+    Validate image quality for better leaf detection.
+    
+    Args:
+        image_path (str): Path to the image file
+        
+    Returns:
+        dict: Quality metrics and recommendations
+    """
+    try:
+        img = cv2.imread(image_path)
+        if img is None:
+            return {"valid": False, "reason": "Cannot load image"}
+        
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        height, width = gray.shape
+        
+        quality_metrics = {}
+        
+        # 1. Resolution check
+        min_resolution = 100
+        if height < min_resolution or width < min_resolution:
+            quality_metrics["resolution"] = "Too low"
+        else:
+            quality_metrics["resolution"] = "Good"
+        
+        # 2. Brightness check
+        mean_brightness = np.mean(gray)
+        if mean_brightness < 50:
+            quality_metrics["brightness"] = "Too dark"
+        elif mean_brightness > 200:
+            quality_metrics["brightness"] = "Too bright"
+        else:
+            quality_metrics["brightness"] = "Good"
+        
+        # 3. Contrast check
+        contrast = np.std(gray)
+        if contrast < 20:
+            quality_metrics["contrast"] = "Too low"
+        else:
+            quality_metrics["contrast"] = "Good"
+        
+        # 4. Blur detection using Laplacian variance
+        blur_score = cv2.Laplacian(gray, cv2.CV_64F).var()
+        if blur_score < 100:
+            quality_metrics["sharpness"] = "Blurry"
+        else:
+            quality_metrics["sharpness"] = "Sharp"
+        
+        # Overall quality assessment
+        good_metrics = sum(1 for v in quality_metrics.values() if v == "Good" or v == "Sharp")
+        total_metrics = len(quality_metrics)
+        
+        quality_score = good_metrics / total_metrics
+        
+        return {
+            "valid": quality_score >= 0.5,
+            "quality_score": quality_score,
+            "metrics": quality_metrics,
+            "recommendations": get_quality_recommendations(quality_metrics)
+        }
+        
+    except Exception as e:
+        return {"valid": False, "reason": f"Error analyzing image: {str(e)}"}
+
+def get_quality_recommendations(metrics):
+    """
+    Get recommendations based on image quality metrics.
+    
+    Args:
+        metrics (dict): Quality metrics
+        
+    Returns:
+        list: List of recommendations
+    """
+    recommendations = []
+    
+    if metrics.get("resolution") == "Too low":
+        recommendations.append("Use a higher resolution image (at least 224x224 pixels)")
+    
+    if metrics.get("brightness") == "Too dark":
+        recommendations.append("Take the photo in better lighting or increase brightness")
+    elif metrics.get("brightness") == "Too bright":
+        recommendations.append("Reduce exposure or avoid direct sunlight")
+    
+    if metrics.get("contrast") == "Too low":
+        recommendations.append("Improve contrast by using better lighting conditions")
+    
+    if metrics.get("sharpness") == "Blurry":
+        recommendations.append("Ensure the camera is focused and stable when taking the photo")
+    
+    if not recommendations:
+        recommendations.append("Image quality is good for analysis")
+    
+    return recommendations
+
+def extract_leaf_specific_features(image_path):
+    """
+    Extract features specifically useful for leaf validation.
+    
+    Args:
+        image_path (str): Path to the image file
+        
+    Returns:
+        dict: Leaf-specific features
+    """
+    try:
+        img = cv2.imread(image_path)
+        img_rgb = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        
+        features = {}
+        
+        # 1. Green color analysis
+        lower_green = np.array([35, 40, 40])
+        upper_green = np.array([85, 255, 255])
+        green_mask = cv2.inRange(img_hsv, lower_green, upper_green)
+        green_percentage = (np.sum(green_mask > 0) / green_mask.size) * 100
+        features["green_percentage"] = green_percentage
+        
+        # 2. Shape analysis
+        edges = cv2.Canny(gray, 50, 150)
+        contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
+        if contours:
+            largest_contour = max(contours, key=cv2.contourArea)
+            area = cv2.contourArea(largest_contour)
+            perimeter = cv2.arcLength(largest_contour, True)
+            
+            if perimeter > 0:
+                circularity = (4 * np.pi * area) / (perimeter * perimeter)
+                features["circularity"] = circularity
+                features["contour_area_ratio"] = area / gray.size
+            else:
+                features["circularity"] = 0
+                features["contour_area_ratio"] = 0
+        else:
+            features["circularity"] = 0
+            features["contour_area_ratio"] = 0
+        
+        # 3. Texture analysis
+        # Calculate Local Binary Pattern-like texture
+        texture_score = np.std(gray)
+        features["texture_variation"] = texture_score
+        
+        # 4. Color distribution
+        # Check if image has natural color variation
+        color_std = np.std(img_rgb, axis=(0, 1))
+        features["color_variation"] = np.mean(color_std)
+        
+        return features
+        
+    except Exception as e:
+        return {"error": str(e)}
+
+def create_leaf_validation_report(image_path):
+    """
+    Create a comprehensive report for leaf validation.
+    
+    Args:
+        image_path (str): Path to the image file
+        
+    Returns:
+        dict: Comprehensive validation report
+    """
+    quality_report = validate_image_quality(image_path)
+    leaf_features = extract_leaf_specific_features(image_path)
+    general_features = extract_features(image_path)
+    
+    report = {
+        "image_path": image_path,
+        "quality_assessment": quality_report,
+        "leaf_features": leaf_features,
+        "general_features": general_features,
+        "timestamp": np.datetime64('now').astype(str)
+    }
+    
+    return report

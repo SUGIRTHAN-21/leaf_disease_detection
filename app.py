@@ -64,23 +64,73 @@ def predict():
             from model.model import predict_disease
             from utils.treatments import get_treatment
 
-            disease_name, confidence = predict_disease(filepath)
-            disease_name = disease_name.strip().replace('\n', '').replace('\r', '')  # Clean label
-            print("Predicted Disease:", repr(disease_name))  # Debugging output
+            # Enhanced prediction with leaf validation
+            disease_name, confidence, is_leaf, leaf_confidence = predict_disease(filepath)
+            
+            # Clean the disease name
+            disease_name = disease_name.strip().replace('\n', '').replace('\r', '')
+            print(f"Prediction Results - Disease: {repr(disease_name)}, Confidence: {confidence:.2f}%, Is Leaf: {is_leaf}, Leaf Confidence: {leaf_confidence:.2f}")
 
-            treatment = get_treatment(disease_name)
+            # Handle different prediction outcomes
+            if not is_leaf or disease_name == "NOT_A_LEAF":
+                # Image is not a leaf
+                return render_template('result.html', 
+                                       image_path=f"/static/uploads/{filename}",
+                                       disease="Not a Leaf",
+                                       confidence=0,
+                                       is_leaf=False,
+                                       leaf_confidence=leaf_confidence,
+                                       error_message="The uploaded image does not appear to be a leaf. Please upload a clear image of a plant leaf for disease detection.",
+                                       treatment=None)
+            
+            elif disease_name == "UNCLEAR_IMAGE":
+                # Image might be a leaf but unclear
+                return render_template('result.html', 
+                                       image_path=f"/static/uploads/{filename}",
+                                       disease="Unclear Image",
+                                       confidence=confidence,
+                                       is_leaf=True,
+                                       leaf_confidence=leaf_confidence,
+                                       error_message="The image is unclear or the leaf condition is not recognizable. Please upload a clearer, well-lit image of the leaf.",
+                                       treatment=None)
+            
+            else:
+                # Valid leaf with disease prediction
+                treatment = get_treatment(disease_name)
+                
+                return render_template('result.html', 
+                                       image_path=f"/static/uploads/{filename}",
+                                       disease=disease_name,
+                                       confidence=confidence,
+                                       is_leaf=True,
+                                       leaf_confidence=leaf_confidence,
+                                       treatment=treatment,
+                                       error_message=None)
 
-            return render_template('result.html', 
-                                   image_path=f"/static/uploads/{filename}",
-                                   disease=disease_name,
-                                   confidence=confidence,
-                                   treatment=treatment)
         except Exception as e:
+            print(f"Prediction error: {str(e)}")
             flash(f"Error during prediction: {str(e)}")
             return redirect(url_for('index'))
 
-    flash('File type not allowed')
+    flash('File type not allowed. Please upload PNG, JPG, or JPEG files only.')
     return redirect(url_for('index'))
+
+@app.route('/test_leaf_detection')
+def test_leaf_detection():
+    """
+    Test endpoint to check leaf detection functionality
+    """
+    try:
+        from model.model import is_leaf_image
+        
+        # This is just for testing - you can remove this route in production
+        test_results = {
+            "endpoint": "working",
+            "leaf_detection": "available"
+        }
+        return test_results
+    except Exception as e:
+        return {"error": str(e)}
 
 if __name__ == '__main__':
     app.run(debug=True)

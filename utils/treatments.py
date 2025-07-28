@@ -1,3 +1,10 @@
+import tensorflow as tf
+import numpy as np
+from PIL import Image
+import json
+import os
+
+# Your existing treatments database
 TREATMENTS = {
     "Apple___Apple_scab": {
         "disease_name": "Apple Scab",
@@ -162,6 +169,153 @@ TREATMENTS = {
     }
 }
 
+class PlantDiseaseAnalyzer:
+    def __init__(self, model_path, class_labels_path):
+        """
+        Initialize the plant disease analyzer with model and class labels.
+        
+        Args:
+            model_path (str): Path to the trained model file
+            class_labels_path (str): Path to the class labels JSON file
+        """
+        self.model = None
+        self.class_labels = []
+        self.load_model(model_path)
+        self.load_class_labels(class_labels_path)
+    
+    def load_model(self, model_path):
+        """Load the trained TensorFlow model."""
+        try:
+            self.model = tf.keras.models.load_model(model_path)
+            print(f"Model loaded successfully from {model_path}")
+        except Exception as e:
+            print(f"Error loading model: {str(e)}")
+            raise
+    
+    def load_class_labels(self, class_labels_path):
+        """Load class labels from JSON file."""
+        try:
+            with open(class_labels_path, 'r') as f:
+                self.class_labels = json.load(f)
+            print(f"Class labels loaded: {len(self.class_labels)} classes")
+        except Exception as e:
+            print(f"Error loading class labels: {str(e)}")
+            # Fallback to common plant disease classes if file not found
+            self.class_labels = [
+                "Apple___Apple_scab", "Apple___Black_rot", "Apple___Cedar_apple_rust", "Apple___healthy",
+                "Tomato___Early_blight", "Tomato___Late_blight", "Tomato___healthy"
+            ]
+    
+    def preprocess_image(self, image_path, target_size=(224, 224)):
+        """
+        Preprocess image for model prediction.
+        
+        Args:
+            image_path (str): Path to the image file
+            target_size (tuple): Target size for resizing
+            
+        Returns:
+            numpy.ndarray: Preprocessed image array
+        """
+        try:
+            # Load and preprocess image
+            image = Image.open(image_path)
+            image = image.convert('RGB')  # Ensure RGB format
+            image = image.resize(target_size)
+            
+            # Convert to array and normalize
+            image_array = np.array(image)
+            image_array = image_array / 255.0  # Normalize to [0,1]
+            image_array = np.expand_dims(image_array, axis=0)  # Add batch dimension
+            
+            return image_array
+        except Exception as e:
+            print(f"Error preprocessing image: {str(e)}")
+            raise
+    
+    def predict_disease(self, image_path, confidence_threshold=0.5):
+        """
+        Predict plant disease from image.
+        
+        Args:
+            image_path (str): Path to the image file
+            confidence_threshold (float): Minimum confidence for prediction
+            
+        Returns:
+            tuple: (predicted_class, confidence_score)
+        """
+        try:
+            # Preprocess image
+            processed_image = self.preprocess_image(image_path)
+            
+            # Make prediction
+            predictions = self.model.predict(processed_image)
+            predicted_index = np.argmax(predictions[0])
+            confidence = float(predictions[0][predicted_index])
+            
+            # Get predicted class name
+            if predicted_index < len(self.class_labels):
+                predicted_class = self.class_labels[predicted_index]
+            else:
+                predicted_class = "unknown"
+            
+            print(f"Prediction: {predicted_class} (Confidence: {confidence:.2f})")
+            
+            # Return unknown if confidence is too low
+            if confidence < confidence_threshold:
+                return "unknown", confidence
+            
+            return predicted_class, confidence
+            
+        except Exception as e:
+            print(f"Error during prediction: {str(e)}")
+            return "unknown", 0.0
+
+def analyze_and_treat(image_path, model_path="model/model.pth", class_labels_path="model/class_labels.json"):
+    """
+    Complete workflow: analyze image and return treatment recommendations.
+    
+    Args:
+        image_path (str): Path to the uploaded image
+        model_path (str): Path to the trained model
+        class_labels_path (str): Path to class labels file
+        
+    Returns:
+        dict: Complete analysis and treatment information
+    """
+    try:
+        # Initialize analyzer
+        analyzer = PlantDiseaseAnalyzer(model_path, class_labels_path)
+        
+        # Predict disease
+        predicted_disease, confidence = analyzer.predict_disease(image_path)
+        
+        # Get treatment information
+        treatment_info = get_treatment(predicted_disease)
+        
+        # Add prediction metadata
+        result = {
+            "prediction": {
+                "disease_class": predicted_disease,
+                "confidence": confidence,
+                "model_used": model_path
+            },
+            "treatment": treatment_info
+        }
+        
+        return result
+        
+    except Exception as e:
+        print(f"Error in analysis workflow: {str(e)}")
+        # Return fallback response
+        return {
+            "prediction": {
+                "disease_class": "unknown",
+                "confidence": 0.0,
+                "error": str(e)
+            },
+            "treatment": get_treatment("unknown")
+        }
 
 def get_treatment(disease_name):
     """
@@ -186,17 +340,18 @@ def get_treatment(disease_name):
         print(f"[WARNING] Disease '{disease_name}' not found. Returning fallback.")
         return TREATMENTS["unknown"]
 
+# Quick test function
+def test_system():
+    """Test the complete system with sample data."""
+    print("Testing Plant Disease Analysis System...")
+    
+    # Test treatment lookup
+    test_diseases = ["Apple___Apple_scab", "Tomato___Early_blight", "unknown"]
+    for disease in test_diseases:
+        treatment = get_treatment(disease)
+        print(f"\nDisease: {treatment['disease_name']}")
+        print(f"Description: {treatment['description']}")
+        print(f"Treatments: {len(treatment['treatments'])} available")
 
-# Optional: Run a test if this file is executed directly
 if __name__ == "__main__":
-    test_diseases = [
-        "Apple___Apple_scab",
-        "Apple___Black_rot ",
-        "apple___Apple_scab",  # invalid due to case
-        " Tomato___Late_blight",
-        "Tomato___unknown"
-    ]
-    for d in test_diseases:
-        info = get_treatment(d)
-        print(f"\nDisease: {info['disease_name']}")
-        print(f"Description: {info['description']}")
+    test_system()
